@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — GitHub test release
+## 0.1.0 — GitHub test release
 
 - Refined the welcome screen without changing the permission-slide flow.
 - Added Focus Trail ball unlocks, score-based progression, and varied movement paths.
