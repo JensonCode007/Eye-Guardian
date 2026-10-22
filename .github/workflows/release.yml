@@ -34,7 +34,7 @@ jobs:
       - name: Build signed release APK
         working-directory: Android
         shell: bash
-        run: ./gradlew assembleRelease
+        run: bash ./gradlew assembleRelease
         env:
           ANDROID_KEYSTORE_PATH: release-keystore.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

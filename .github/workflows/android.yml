@@ -26,11 +26,11 @@ jobs:
 
       - name: Run unit tests and lint
         working-directory: Android
-        run: ./gradlew testDebugUnitTest lintDebug
+        run: bash ./gradlew testDebugUnitTest lintDebug
 
       - name: Build installable test APK
         working-directory: Android
-        run: ./gradlew assembleInstallable
+        run: bash ./gradlew assembleInstallable
 
       - name: Upload test APK
         uses: actions/upload-artifact@v4
