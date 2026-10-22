@@ -1,0 +1,31 @@
+# Android / Gradle
+.gradle/
+**/.kotlin/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+local.properties
+
+# IDE
+.idea/
+*.iml
+captures/
+.DS_Store
+
+# Signing and secrets
+*.jks
+*.keystore
+keystore.properties
+*.pem
+*.p12
+
+# Local release artifacts; attach these to GitHub Releases instead
+*.apk
+*.aab
+*.idsig
+
+# Generated reports and device captures
+*.pdf
+*.jpeg
+*.jpg
+*.png
