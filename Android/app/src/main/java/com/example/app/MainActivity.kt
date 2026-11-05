@@ -180,10 +180,12 @@ private fun EyeGuardianApp(
     var showUsageScreen by remember { mutableStateOf(false) }
     var showGame by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var showCustomDistance by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = showGame || showSettings || showDistanceLab || showUsageScreen) {
+    BackHandler(enabled = showGame || showSettings || showDistanceLab || showUsageScreen || showCustomDistance) {
         when {
             showGame -> showGame = false
+            showCustomDistance -> showCustomDistance = false
             showSettings -> showSettings = false
             showDistanceLab -> showDistanceLab = false
             showUsageScreen -> showUsageScreen = false
@@ -206,17 +208,24 @@ private fun EyeGuardianApp(
                 modifier = Modifier.padding(innerPadding),
                 onBack = { showGame = false }
             )
+        } else if (showCustomDistance) {
+            CustomDistanceProfilesScreen(
+                modifier = Modifier.padding(innerPadding),
+                onBack = { showCustomDistance = false }
+            )
         } else if (showSettings) {
             SettingsScreen(
                 modifier = Modifier.padding(innerPadding),
                 onBack = { showSettings = false },
                 isDarkTheme = isDarkTheme,
-                onThemeChanged = onThemeChanged
+                onThemeChanged = onThemeChanged,
+                onOpenCustomDistance = { showCustomDistance = true }
             )
         } else if (showDistanceLab) {
             DistanceLabScreen(
                 modifier = Modifier.padding(innerPadding),
-                onBack = { showDistanceLab = false }
+                onBack = { showDistanceLab = false },
+                onOpenCustomDistance = { showCustomDistance = true }
             )
         } else if (showUsageScreen) {
             UsageAccessScreen(
@@ -845,7 +854,8 @@ private fun SettingsScreen(
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
     isDarkTheme: Boolean,
-    onThemeChanged: (Boolean) -> Unit
+    onThemeChanged: (Boolean) -> Unit,
+    onOpenCustomDistance: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -857,7 +867,7 @@ private fun SettingsScreen(
     var hasUsageAccess by remember { mutableStateOf(usageAccessGranted(context)) }
     var profileName by remember { mutableStateOf(historyStore.getProfileName()) }
     var profileAge by remember { mutableStateOf(historyStore.getProfileAge()?.toString() ?: "") }
-    var protectionMode by remember { mutableStateOf(historyStore.getProtectionMode()) }
+    var activeDistanceProfile by remember { mutableStateOf(historyStore.getActiveDistanceProfile()) }
     var isEditingProfile by remember {
         mutableStateOf(historyStore.getProfileName().isBlank() && historyStore.getProfileAge() == null)
     }
@@ -1182,9 +1192,10 @@ private fun SettingsScreen(
         }
 
         ProtectionModeCard(
-            selectedMode = protectionMode,
+            selectedMode = ProtectionMode.fromId(activeDistanceProfile.id.removePrefix("mode:")),
+            customProfileLabel = activeDistanceProfile.label.takeIf { activeDistanceProfile.isCustom },
             onModeSelected = { mode ->
-                protectionMode = mode
+                activeDistanceProfile = mode.asDistanceProfile()
                 historyStore.setProtectionMode(mode)
                 if (DistanceMonitoringService.isRunning) {
                     context.startService(
@@ -1195,6 +1206,8 @@ private fun SettingsScreen(
                 }
             }
         )
+
+        CustomDistanceShortcutCard(onOpenCustomDistance = onOpenCustomDistance)
 
         Card(
             border = glassBorder(),
@@ -1670,7 +1683,8 @@ private fun SettingsScreen(
 @Composable
 private fun DistanceLabScreen(
     modifier: Modifier = Modifier,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenCustomDistance: () -> Unit
 ) {
     val context = LocalContext.current
     var hasCameraPermission by remember {
@@ -1687,7 +1701,7 @@ private fun DistanceLabScreen(
     var lastLocalWarningAt by remember { mutableStateOf(0L) }
     var permissionMessage by remember { mutableStateOf<String?>(null) }
     val historyStore = remember(context) { EyeGuardianStore(context) }
-    var protectionMode by remember { mutableStateOf(historyStore.getProtectionMode()) }
+    var activeDistanceProfile by remember { mutableStateOf(historyStore.getActiveDistanceProfile()) }
     var backgroundMonitoring by remember { mutableStateOf(DistanceMonitoringService.isRunning) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -1731,13 +1745,13 @@ private fun DistanceLabScreen(
 
     LightAssistEffect(enabled = lightAssistEnabled)
 
-    LaunchedEffect(latestResult.status, backgroundMonitoring, protectionMode) {
+    LaunchedEffect(latestResult.status, backgroundMonitoring, activeDistanceProfile) {
         if (!backgroundMonitoring && latestResult.status == DistanceStatus.TOO_CLOSE) {
-            kotlinx.coroutines.delay(protectionMode.warningDelayMillis)
+            kotlinx.coroutines.delay(activeDistanceProfile.warningDelayMillis)
             if (
                 latestResult.status == DistanceStatus.TOO_CLOSE &&
                 (lastLocalWarningAt == 0L ||
-                    System.currentTimeMillis() - lastLocalWarningAt >= protectionMode.warningCooldownMillis)
+                    System.currentTimeMillis() - lastLocalWarningAt >= activeDistanceProfile.warningCooldownMillis)
             ) {
                 lastLocalWarningAt = System.currentTimeMillis()
                 historyStore.recordDistanceWarning()
@@ -1781,9 +1795,10 @@ private fun DistanceLabScreen(
         )
 
         ProtectionModeCard(
-            selectedMode = protectionMode,
+            selectedMode = ProtectionMode.fromId(activeDistanceProfile.id.removePrefix("mode:")),
+            customProfileLabel = activeDistanceProfile.label.takeIf { activeDistanceProfile.isCustom },
             onModeSelected = { mode ->
-                protectionMode = mode
+                activeDistanceProfile = mode.asDistanceProfile()
                 historyStore.setProtectionMode(mode)
                 if (backgroundMonitoring) {
                     context.startService(
@@ -1794,6 +1809,16 @@ private fun DistanceLabScreen(
                 }
             }
         )
+
+        CustomDistanceShortcutCard(onOpenCustomDistance = onOpenCustomDistance)
+
+        if (activeDistanceProfile.isCustom) {
+            Text(
+                text = "Active custom mode: ${activeDistanceProfile.label} · calibrated from your chosen viewing position",
+                style = MaterialTheme.typography.bodySmall,
+                color = appColor(0xFF2E7D55)
+            )
+        }
 
         permissionMessage?.let { message ->
             Card(
@@ -1878,7 +1903,7 @@ private fun DistanceLabScreen(
                         .fillMaxWidth()
                         .aspectRatio(3f / 4f)
                         .clip(RoundedCornerShape(20.dp)),
-                    protectionMode = protectionMode,
+                    protectionProfile = activeDistanceProfile,
                     onDistanceResult = { latestResult = it }
                 )
                 DistanceStatusCard(
@@ -1886,6 +1911,7 @@ private fun DistanceLabScreen(
                     lightAssistEnabled = lightAssistEnabled,
                     onToggleLightAssist = { lightAssistEnabled = !lightAssistEnabled }
                 )
+                AmbientLightBanner(level = latestResult.ambientLight)
                 Button(
                     onClick = { startBackgroundMonitoring() },
                     colors = ButtonDefaults.buttonColors(
@@ -1945,6 +1971,39 @@ private fun DistanceLabScreen(
 }
 
 @Composable
+private fun AmbientLightBanner(level: AmbientLightLevel) {
+    val isDim = level == AmbientLightLevel.DIM
+    val isBright = level == AmbientLightLevel.BRIGHT
+    if (!isDim && !isBright) return
+
+    Card(
+        border = glassBorder(),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isDim) appColor(0xFFFFF0C9) else appColor(0xFFFFE3CE)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = if (isDim) "Ambient light alert" else "Room light is strong",
+                style = MaterialTheme.typography.titleSmall,
+                color = if (isDim) appColor(0xFF765600) else appColor(0xFF8A4A13)
+            )
+            Text(
+                text = if (isDim) {
+                    "Add a soft lamp or move toward a window. Better light helps the camera estimate distance more steadily."
+                } else {
+                    "A softer light may make distance guidance more comfortable and consistent."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = appColor(0xFF675844)
+            )
+        }
+    }
+}
+
+@Composable
 private fun DistanceWarningOverlay(onMoveBack: () -> Unit) {
     Box(
         modifier = Modifier
@@ -1995,8 +2054,370 @@ private fun DistanceWarningOverlay(onMoveBack: () -> Unit) {
 }
 
 @Composable
+private fun CustomDistanceShortcutCard(onOpenCustomDistance: () -> Unit) {
+    Card(
+        border = glassBorder(),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = appColor(0xFFFFE8F0).copy(alpha = .88f))
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Custom distance modes",
+                style = MaterialTheme.typography.titleMedium,
+                color = appColor(0xFF6E294B)
+            )
+            Text(
+                text = "Create named settings such as Bed or Casual, choose a target distance, and decide how often a calm reminder may repeat.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = appColor(0xFF80546A)
+            )
+            OutlinedButton(
+                onClick = onOpenCustomDistance,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = appColor(0xFFB33E68))
+            ) {
+                Text("Set custom distance")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomDistanceProfilesScreen(
+    modifier: Modifier = Modifier,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val store = remember(context) { EyeGuardianStore(context) }
+    var profiles by remember { mutableStateOf(store.readCustomDistanceProfiles()) }
+    var selectedId by remember { mutableStateOf(store.getSelectedDistanceProfileId()) }
+    var editingId by remember { mutableStateOf<String?>(null) }
+    var showEditor by remember { mutableStateOf(false) }
+    var isCalibrating by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var calibratedFaceWidthRatio by remember { mutableStateOf<Float?>(null) }
+    var calibrationResult by remember { mutableStateOf(DistanceResult.unknown()) }
+    var warningDelay by remember { mutableStateOf(5_000L) }
+    var warningCooldown by remember { mutableStateOf(90_000L) }
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+        if (!granted) {
+            Toast.makeText(context, "Camera permission is needed for calibration", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val delayOptions = listOf(5_000L, 10_000L, 20_000L, 30_000L)
+    val repeatOptions = listOf(30_000L, 60_000L, 120_000L, 300_000L, 600_000L)
+
+    fun refreshMonitoringSettings() {
+        if (DistanceMonitoringService.isRunning) {
+            context.startService(
+                Intent(context, DistanceMonitoringService::class.java).apply {
+                    action = DistanceMonitoringService.ACTION_REFRESH_SETTINGS
+                }
+            )
+        }
+    }
+
+    fun beginEditor(profile: CustomDistanceProfile?) {
+        showEditor = true
+        editingId = profile?.id
+        name = profile?.name ?: ""
+        calibratedFaceWidthRatio = profile?.calibratedFaceWidthRatio
+        calibrationResult = DistanceResult.unknown()
+        isCalibrating = false
+        warningDelay = profile?.warningDelayMillis ?: 5_000L
+        warningCooldown = profile?.warningCooldownMillis ?: 90_000L
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    listOf(appColor(0xFFF4F0FF), appColor(0xFFE9F5FF), appColor(0xFFFFF1F5))
+                )
+            )
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = onBack) { Text("Back") }
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = "Custom distance",
+                style = MaterialTheme.typography.headlineSmall,
+                color = appColor(0xFF163B2A)
+            )
+        }
+
+        Text(
+            text = "Create a named mode, then use the live camera to choose the viewing position that feels right. Eye Guardian saves that on-device face-size reference; camera frames are never saved.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = appColor(0xFF5F6D65)
+        )
+
+        if (showEditor) {
+            Card(
+                border = glassBorder(),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = appColor(0xFFE8F0FF).copy(alpha = .90f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = if (editingId == null) "New distance mode" else "Edit distance mode",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = appColor(0xFF164A70)
+                    )
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it.take(40) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Mode name") },
+                        placeholder = { Text("Bed, Casual, Desk...") },
+                        singleLine = true
+                    )
+                    Text(
+                        text = if (calibratedFaceWidthRatio != null) {
+                            "A viewing position is calibrated for this mode. Recalibrate any time you change how you use your phone."
+                        } else {
+                            "No viewing position is calibrated yet. Start the camera and choose the distance you want Eye Guardian to protect."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = appColor(0xFF5F6D65)
+                    )
+                    if (isCalibrating) {
+                        if (hasCameraPermission) {
+                            CameraPreview(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(3f / 4f)
+                                    .clip(RoundedCornerShape(20.dp)),
+                                protectionProfile = ProtectionMode.READING.asDistanceProfile(),
+                                onDistanceResult = { result ->
+                                    calibrationResult = result
+                                    result.faceWidthRatio?.let { calibratedFaceWidthRatio = it }
+                                }
+                            )
+                            Card(
+                                border = glassBorder(),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.cardColors(containerColor = appColor(0xFFEAF4FF))
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = "Move to your preferred position",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = appColor(0xFF164A70)
+                                    )
+                                    Text(
+                                        text = calibrationResult.message,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = appColor(0xFF5F6D65)
+                                    )
+                                    Text(
+                                        text = "Keep your face centered, then tap Set this distance.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = appColor(0xFF718078)
+                                    )
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    enabled = calibratedFaceWidthRatio != null,
+                                    onClick = {
+                                        isCalibrating = false
+                                        Toast.makeText(context, "Viewing position set", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = appColor(0xFF2E7D55))
+                                ) { Text("Set this distance") }
+                                OutlinedButton(onClick = { isCalibrating = false }) { Text("Cancel") }
+                            }
+                        } else {
+                            Text(
+                                text = "Camera permission is required to calibrate a custom mode.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = appColor(0xFF80546A)
+                            )
+                            Button(
+                                onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                                colors = ButtonDefaults.buttonColors(containerColor = appColor(0xFF2E7D55))
+                            ) { Text("Allow camera") }
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                if (hasCameraPermission) {
+                                    isCalibrating = true
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            }
+                        ) {
+                            Text(if (calibratedFaceWidthRatio == null) "Open camera to calibrate" else "Recalibrate with camera")
+                        }
+                    }
+                    Text(
+                        text = "First reminder after",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = appColor(0xFF164A70)
+                    )
+                    delayOptions.forEach { option ->
+                        val selected = option == warningDelay
+                        if (selected) {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {},
+                                colors = ButtonDefaults.buttonColors(containerColor = appColor(0xFF3178C6))
+                            ) { Text("After ${option / 1_000} seconds") }
+                        } else {
+                            OutlinedButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { warningDelay = option }
+                            ) { Text("After ${option / 1_000} seconds") }
+                        }
+                    }
+                    Text(
+                        text = "Repeat reminder no more often than",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = appColor(0xFF164A70)
+                    )
+                    repeatOptions.forEach { option ->
+                        val selected = option == warningCooldown
+                        val label = if (option < 60_000L) "${option / 1_000} seconds" else "${option / 60_000} minutes"
+                        if (selected) {
+                            Button(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {},
+                                colors = ButtonDefaults.buttonColors(containerColor = appColor(0xFF3178C6))
+                            ) { Text("Every $label") }
+                        } else {
+                            OutlinedButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { warningCooldown = option }
+                            ) { Text("Every $label") }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                if (calibratedFaceWidthRatio == null) {
+                                    Toast.makeText(context, "Calibrate the viewing position first", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                val saved = CustomDistanceProfile(
+                                    id = editingId ?: "custom_${System.currentTimeMillis()}",
+                                    name = name.trim().ifBlank { "Custom distance" },
+                                    targetDistanceCm = 45,
+                                    calibratedFaceWidthRatio = calibratedFaceWidthRatio,
+                                    warningDelayMillis = warningDelay,
+                                    warningCooldownMillis = warningCooldown
+                                )
+                                store.saveCustomDistanceProfile(saved)
+                                profiles = store.readCustomDistanceProfiles()
+                                selectedId = "custom:${saved.id}"
+                                refreshMonitoringSettings()
+                                editingId = null
+                                name = ""
+                                showEditor = false
+                                Toast.makeText(context, "Custom distance saved", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = appColor(0xFF2E7D55))
+                        ) { Text("Save mode") }
+                        OutlinedButton(onClick = { editingId = null; name = ""; isCalibrating = false; showEditor = false }) { Text("Cancel") }
+                    }
+                }
+            }
+        }
+
+        Button(
+            onClick = { beginEditor(null) },
+            colors = ButtonDefaults.buttonColors(containerColor = appColor(0xFF2E7D55))
+        ) { Text("Add custom distance") }
+
+        profiles.forEach { profile ->
+            val selected = selectedId == "custom:${profile.id}"
+            Card(
+                border = glassBorder(),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = appColor(0xFFFFFFFF).copy(alpha = .80f))
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(profile.name, style = MaterialTheme.typography.titleMedium, color = appColor(0xFF163B2A))
+                            Text("Calibrated viewing position · first reminder ${profile.warningDelayMillis / 1_000}s", color = appColor(0xFF5F6D65))
+                            Text(
+                                if (selected) "Active mode · repeats no more often than ${formatWarningInterval(profile.warningCooldownMillis)}"
+                                else "Saved on this device",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (selected) appColor(0xFF2E7D55) else appColor(0xFF718078)
+                            )
+                        }
+                        if (selected) {
+                            Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = appColor(0xFF2E7D55))) { Text("Active") }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    store.setSelectedDistanceProfileId("custom:${profile.id}")
+                                    selectedId = "custom:${profile.id}"
+                                    refreshMonitoringSettings()
+                                }
+                            ) { Text("Use") }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { beginEditor(profile) }) { Text("Edit") }
+                        TextButton(
+                            onClick = {
+                                store.deleteCustomDistanceProfile(profile.id)
+                                profiles = store.readCustomDistanceProfiles()
+                                selectedId = store.getSelectedDistanceProfileId()
+                                refreshMonitoringSettings()
+                            }
+                        ) { Text("Delete") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatWarningInterval(millis: Long): String {
+    return if (millis < 60_000L) {
+        "${millis / 1_000} seconds"
+    } else {
+        "${millis / 60_000} minutes"
+    }
+}
+
+@Composable
 private fun ProtectionModeCard(
     selectedMode: ProtectionMode,
+    customProfileLabel: String? = null,
     onModeSelected: (ProtectionMode) -> Unit
 ) {
     Card(
@@ -2019,8 +2440,25 @@ private fun ProtectionModeCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = appColor(0xFF5F6D65)
             )
+            if (customProfileLabel != null) {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {},
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = appColor(0xFF2E7D55),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Custom mode · $customProfileLabel")
+                }
+                Text(
+                    text = "Your custom mode is active. Choose a built-in profile below to switch back.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = appColor(0xFF718078)
+                )
+            }
             ProtectionMode.entries.forEach { mode ->
-                val selected = mode == selectedMode
+                val selected = customProfileLabel == null && mode == selectedMode
                 if (selected) {
                     Button(
                         modifier = Modifier.fillMaxWidth(),
@@ -2147,18 +2585,23 @@ private fun LightAssistEffect(enabled: Boolean) {
 @Composable
 private fun CameraPreview(
     modifier: Modifier = Modifier,
-    protectionMode: ProtectionMode = ProtectionMode.READING,
+    protectionProfile: DistanceProfile = ProtectionMode.READING.asDistanceProfile(),
     onDistanceResult: (DistanceResult) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraSession = remember(context, lifecycleOwner, protectionMode) {
+    val latestOnDistanceResult by rememberUpdatedState(onDistanceResult)
+    val cameraSession = remember(context, lifecycleOwner) {
         CameraSession(
             context = context,
             lifecycleOwner = lifecycleOwner,
-            protectionMode = protectionMode,
-            onDistanceResult = onDistanceResult
+            protectionProfile = protectionProfile,
+            onDistanceResult = { result -> latestOnDistanceResult(result) }
         )
+    }
+
+    LaunchedEffect(cameraSession, protectionProfile) {
+        cameraSession.updateProtectionProfile(protectionProfile)
     }
 
     DisposableEffect(cameraSession) {
@@ -2178,7 +2621,7 @@ private fun CameraPreview(
 private class CameraSession(
     context: Context,
     private val lifecycleOwner: LifecycleOwner,
-    private val protectionMode: ProtectionMode,
+    protectionProfile: DistanceProfile,
     private val onDistanceResult: (DistanceResult) -> Unit
 ) {
     val previewView: PreviewView = PreviewView(context).apply {
@@ -2194,7 +2637,12 @@ private class CameraSession(
     )
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysis: ImageAnalysis? = null
+    @Volatile private var activeProtectionProfile: DistanceProfile = protectionProfile
     @Volatile private var closed = false
+
+    fun updateProtectionProfile(profile: DistanceProfile) {
+        activeProtectionProfile = profile
+    }
 
     fun start() {
         val providerFuture = ProcessCameraProvider.getInstance(previewView.context)
@@ -2211,7 +2659,7 @@ private class CameraSession(
                 .also {
                     it.setAnalyzer(
                         cameraExecutor,
-                        FaceDistanceAnalyzer(faceDetector, { protectionMode }) { result ->
+                        FaceDistanceAnalyzer(faceDetector, { activeProtectionProfile }) { result ->
                             mainHandler.post { onDistanceResult(result) }
                         }
                     )
@@ -2247,7 +2695,7 @@ private class CameraSession(
 @SuppressLint("UnsafeOptInUsageError")
 internal class FaceDistanceAnalyzer(
     private val faceDetector: FaceDetector,
-    private val protectionModeProvider: () -> ProtectionMode = { ProtectionMode.READING },
+    private val protectionProfileProvider: () -> DistanceProfile = { ProtectionMode.READING.asDistanceProfile() },
     private val onResult: (DistanceResult) -> Unit
 ) : ImageAnalysis.Analyzer {
     private var lastFaceResult: DistanceResult? = null
@@ -2297,7 +2745,7 @@ internal class FaceDistanceAnalyzer(
                             inputImage.width.toFloat()
                         DistanceResult.fromFaceWidthRatio(
                             faceWidthRatio,
-                            protectionModeProvider(),
+                            protectionProfileProvider(),
                             ambientLight
                         )
                     }
@@ -2347,7 +2795,8 @@ internal data class DistanceResult(
     val status: DistanceStatus,
     val message: String,
     val detail: String,
-    val ambientLight: AmbientLightLevel = AmbientLightLevel.UNKNOWN
+    val ambientLight: AmbientLightLevel = AmbientLightLevel.UNKNOWN,
+    val faceWidthRatio: Float? = null
 ) {
     companion object {
         fun unknown(
@@ -2369,28 +2818,31 @@ internal data class DistanceResult(
 
         fun fromFaceWidthRatio(
             ratio: Float,
-            protectionMode: ProtectionMode = ProtectionMode.READING,
+            protectionProfile: DistanceProfile = ProtectionMode.READING.asDistanceProfile(),
             ambientLight: AmbientLightLevel = AmbientLightLevel.UNKNOWN
         ): DistanceResult {
             val percent = (ratio * 100).toInt()
             return when {
-                ratio >= protectionMode.tooCloseRatio -> DistanceResult(
+                ratio >= protectionProfile.tooCloseRatio -> DistanceResult(
                     DistanceStatus.TOO_CLOSE,
                     "Move the phone a little farther away.",
                     "Face size in frame: about $percent%",
-                    ambientLight
+                    ambientLight,
+                    ratio
                 )
-                ratio >= protectionMode.gettingCloseRatio -> DistanceResult(
+                ratio >= protectionProfile.gettingCloseRatio -> DistanceResult(
                     DistanceStatus.GETTING_CLOSE,
                     "A little more space may be comfortable.",
                     "Face size in frame: about $percent%",
-                    ambientLight
+                    ambientLight,
+                    ratio
                 )
                 else -> DistanceResult(
                     DistanceStatus.COMFORTABLE,
                     "Your current position looks comfortable.",
                     "Face size in frame: about $percent%",
-                    ambientLight
+                    ambientLight,
+                    ratio
                 )
             }
         }
@@ -2594,11 +3046,107 @@ internal class EyeGuardianStore(context: Context) {
     }
 
     fun getProtectionMode(): ProtectionMode {
-        return ProtectionMode.fromId(preferences.getString(KEY_PROTECTION_MODE, null))
+        val selectedId = getSelectedDistanceProfileId()
+        return ProtectionMode.fromId(selectedId.removePrefix("mode:"))
     }
 
     fun setProtectionMode(mode: ProtectionMode) {
-        preferences.edit().putString(KEY_PROTECTION_MODE, mode.name).apply()
+        preferences.edit()
+            .putString(KEY_PROTECTION_MODE, mode.name)
+            .putString(KEY_SELECTED_DISTANCE_PROFILE, "mode:${mode.name}")
+            .apply()
+    }
+
+    fun getSelectedDistanceProfileId(): String {
+        val saved = preferences.getString(KEY_SELECTED_DISTANCE_PROFILE, null)
+        if (!saved.isNullOrBlank()) return saved
+        return "mode:${ProtectionMode.fromId(preferences.getString(KEY_PROTECTION_MODE, null)).name}"
+    }
+
+    fun setSelectedDistanceProfileId(id: String) {
+        preferences.edit().putString(KEY_SELECTED_DISTANCE_PROFILE, id).apply()
+    }
+
+    fun getActiveDistanceProfile(): DistanceProfile {
+        val selectedId = getSelectedDistanceProfileId()
+        if (selectedId.startsWith("custom:")) {
+            readCustomDistanceProfiles()
+                .firstOrNull { "custom:${it.id}" == selectedId }
+                ?.let { return it.asDistanceProfile() }
+        }
+        return ProtectionMode.fromId(selectedId.removePrefix("mode:")).asDistanceProfile()
+    }
+
+    fun readCustomDistanceProfiles(): List<CustomDistanceProfile> {
+        val raw = preferences.getString(KEY_CUSTOM_DISTANCE_PROFILES, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    add(
+                        CustomDistanceProfile(
+                            id = item.optString("id"),
+                            name = item.optString("name", "Custom distance"),
+                            targetDistanceCm = item.optInt("targetDistanceCm", 45).coerceIn(20, 150),
+                            calibratedFaceWidthRatio = item.optDouble("calibratedFaceWidthRatio", -1.0)
+                                .takeIf { it > 0.0 }
+                                ?.toFloat(),
+                            warningDelayMillis = item.optLong("warningDelayMillis", 5_000L)
+                                .coerceIn(3_000L, 60_000L),
+                            warningCooldownMillis = item.optLong("warningCooldownMillis", 90_000L)
+                                .coerceIn(30_000L, 30 * 60_000L)
+                        )
+                    )
+                }
+            }.filter { it.id.isNotBlank() && it.name.isNotBlank() }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveCustomDistanceProfile(profile: CustomDistanceProfile) {
+        val profiles = (readCustomDistanceProfiles().filterNot { it.id == profile.id } + profile)
+            .takeLast(MAX_CUSTOM_DISTANCE_PROFILES)
+        val array = JSONArray()
+        profiles.forEach { item ->
+            array.put(
+                JSONObject()
+                    .put("id", item.id)
+                    .put("name", item.name.trim().take(40))
+                    .put("targetDistanceCm", item.targetDistanceCm.coerceIn(20, 150))
+                    .put("calibratedFaceWidthRatio", item.calibratedFaceWidthRatio ?: -1.0f)
+                    .put("warningDelayMillis", item.warningDelayMillis)
+                    .put("warningCooldownMillis", item.warningCooldownMillis)
+            )
+        }
+        preferences.edit()
+            .putString(KEY_CUSTOM_DISTANCE_PROFILES, array.toString())
+            .putString(KEY_SELECTED_DISTANCE_PROFILE, "custom:${profile.id}")
+            .apply()
+    }
+
+    fun deleteCustomDistanceProfile(id: String) {
+        val remaining = readCustomDistanceProfiles().filterNot { it.id == id }
+        val array = JSONArray()
+        remaining.forEach { item ->
+            array.put(
+                JSONObject()
+                    .put("id", item.id)
+                    .put("name", item.name)
+                    .put("targetDistanceCm", item.targetDistanceCm)
+                    .put("calibratedFaceWidthRatio", item.calibratedFaceWidthRatio ?: -1.0f)
+                    .put("warningDelayMillis", item.warningDelayMillis)
+                    .put("warningCooldownMillis", item.warningCooldownMillis)
+            )
+        }
+        val selected = getSelectedDistanceProfileId()
+        preferences.edit()
+            .putString(KEY_CUSTOM_DISTANCE_PROFILES, array.toString())
+            .apply {
+                if (selected == "custom:$id") {
+                    putString(KEY_SELECTED_DISTANCE_PROFILE, "mode:${ProtectionMode.READING.name}")
+                }
+            }
+            .apply()
     }
 
     fun clearPersonalData() {
@@ -2616,6 +3164,8 @@ internal class EyeGuardianStore(context: Context) {
             .remove(KEY_MANUAL_BREAK_AWARDED_BLOCKS)
             .remove(KEY_PROFILE_NAME)
             .remove(KEY_PROFILE_AGE)
+            .remove(KEY_CUSTOM_DISTANCE_PROFILES)
+            .remove(KEY_SELECTED_DISTANCE_PROFILE)
             .remove(KEY_ONBOARDING_COMPLETE)
             .apply()
         LocalCrashLogger.clear(appContext)
@@ -3027,6 +3577,8 @@ internal class EyeGuardianStore(context: Context) {
         const val KEY_NOTIFICATION_SOUND_URI = "notification_sound_uri"
         const val KEY_SELECTED_FOCUS_BALL = "selected_focus_ball"
         const val KEY_PROTECTION_MODE = "protection_mode"
+        const val KEY_SELECTED_DISTANCE_PROFILE = "selected_distance_profile"
+        const val KEY_CUSTOM_DISTANCE_PROFILES = "custom_distance_profiles"
         const val KEY_USAGE = "daily_usage_records"
         const val KEY_WARNINGS = "distance_warning_records"
         const val KEY_GAME_SCORES = "focus_trail_scores"
@@ -3049,6 +3601,7 @@ internal class EyeGuardianStore(context: Context) {
         const val MAX_HISTORY_BREAKS = 500
         const val MAX_HISTORY_TWENTY_TWENTY = 500
         const val MAX_GAME_RESULTS = 100
+        const val MAX_CUSTOM_DISTANCE_PROFILES = 12
         const val WARNING_DEDUPE_WINDOW_MILLIS = 30_000L
         const val DEFAULT_TWENTY_TWENTY_MINUTES = 20L
         const val MIN_TWENTY_TWENTY_MINUTES = 1L

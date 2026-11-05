@@ -22,7 +22,7 @@ class ProtectionProfileTest {
 
     @Test
     fun distanceWarningGatePreventsImmediateRepeatedAlerts() {
-        val profile = ProtectionMode.READING
+        val profile = ProtectionMode.READING.asDistanceProfile()
         assertTrue(
             shouldIssueDistanceWarning(
                 DistanceStatus.TOO_CLOSE,
@@ -50,6 +50,21 @@ class ProtectionProfileTest {
                 tooCloseSinceMillis = 1_000L,
                 lastWarningMillis = 6_000L,
                 warningSentForBlock = false,
+                profile = profile
+            )
+        )
+    }
+
+    @Test
+    fun distanceWarningCooldownAllowsCalmRepeatAfterTheInterval() {
+        val profile = ProtectionMode.READING.asDistanceProfile()
+        assertTrue(
+            shouldIssueDistanceWarning(
+                DistanceStatus.TOO_CLOSE,
+                nowMillis = 100_000L,
+                tooCloseSinceMillis = 1_000L,
+                lastWarningMillis = 1_000L,
+                warningSentForBlock = true,
                 profile = profile
             )
         )

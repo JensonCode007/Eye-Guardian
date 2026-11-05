@@ -51,6 +51,57 @@ internal enum class ProtectionMode(
     }
 }
 
+internal data class DistanceProfile(
+    val id: String,
+    val label: String,
+    val description: String,
+    val tooCloseRatio: Float,
+    val gettingCloseRatio: Float,
+    val warningDelayMillis: Long,
+    val warningCooldownMillis: Long,
+    val targetDistanceCm: Int? = null,
+    val isCustom: Boolean = false
+)
+
+internal data class CustomDistanceProfile(
+    val id: String,
+    val name: String,
+    val targetDistanceCm: Int,
+    val calibratedFaceWidthRatio: Float?,
+    val warningDelayMillis: Long,
+    val warningCooldownMillis: Long
+) {
+    fun asDistanceProfile(): DistanceProfile {
+        // A camera frame gives us a relative face-size signal. Calibration is
+        // preferred; the fallback is only a starting estimate based on the
+        // built-in Reading profile and must be presented as approximate.
+        val ratio = calibratedFaceWidthRatio
+            ?: (ProtectionMode.READING.tooCloseRatio * 45f / targetDistanceCm)
+                .coerceIn(0.20f, 0.60f)
+        return DistanceProfile(
+            id = "custom:$id",
+            label = name,
+                description = "Custom mode calibrated from your chosen viewing position",
+            tooCloseRatio = ratio,
+            gettingCloseRatio = (ratio * 0.70f).coerceAtLeast(0.12f),
+            warningDelayMillis = warningDelayMillis,
+            warningCooldownMillis = warningCooldownMillis,
+            targetDistanceCm = targetDistanceCm,
+            isCustom = true
+        )
+    }
+}
+
+internal fun ProtectionMode.asDistanceProfile(): DistanceProfile = DistanceProfile(
+    id = "mode:$name",
+    label = label,
+    description = description,
+    tooCloseRatio = tooCloseRatio,
+    gettingCloseRatio = gettingCloseRatio,
+    warningDelayMillis = warningDelayMillis,
+    warningCooldownMillis = warningCooldownMillis
+)
+
 internal enum class AmbientLightLevel(val label: String) {
     DIM("Dim scene"),
     COMFORTABLE("Comfortable scene light"),
@@ -70,11 +121,14 @@ internal fun shouldIssueDistanceWarning(
     tooCloseSinceMillis: Long,
     lastWarningMillis: Long,
     warningSentForBlock: Boolean,
-    profile: ProtectionMode
+    profile: DistanceProfile
 ): Boolean {
-    if (status != DistanceStatus.TOO_CLOSE || warningSentForBlock || tooCloseSinceMillis <= 0L) {
+    if (status != DistanceStatus.TOO_CLOSE || tooCloseSinceMillis <= 0L) {
         return false
     }
+    // warningSentForBlock is retained for compatibility with stored/service
+    // state. The cooldown deliberately allows a calm repeat while the user
+    // remains too close; it prevents per-frame notification spam.
     val heldTooCloseLongEnough = nowMillis - tooCloseSinceMillis >= profile.warningDelayMillis
     val cooldownComplete = lastWarningMillis <= 0L ||
         nowMillis - lastWarningMillis >= profile.warningCooldownMillis

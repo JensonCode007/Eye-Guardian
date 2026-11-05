@@ -81,7 +81,7 @@ class DistanceMonitoringService : LifecycleService() {
                 .also {
                     it.setAnalyzer(
                         cameraExecutor,
-                        FaceDistanceAnalyzer(faceDetector, { historyStore.getProtectionMode() }) { result ->
+                        FaceDistanceAnalyzer(faceDetector, { historyStore.getActiveDistanceProfile() }) { result ->
                             mainHandler.post { handleDistanceResult(result) }
                         }
                     )
@@ -440,14 +440,14 @@ class DistanceMonitoringService : LifecycleService() {
                 AmbientLightLevel.DIM -> postStatusNotification(
                     title = "Scene looks dim",
                     text = "Add a soft room light for a clearer distance reading.",
-                    channelId = MONITORING_CHANNEL_ID,
+                    channelId = ALERT_CHANNEL_ID,
                     iconRes = R.drawable.ic_notification_eye,
                     color = NOTIFICATION_GREEN
                 )
                 AmbientLightLevel.BRIGHT -> postStatusNotification(
                     title = "Scene looks bright",
                     text = "A softer light can make the camera reading steadier.",
-                    channelId = MONITORING_CHANNEL_ID,
+                    channelId = ALERT_CHANNEL_ID,
                     iconRes = R.drawable.ic_notification_eye,
                     color = NOTIFICATION_GREEN
                 )
@@ -455,7 +455,7 @@ class DistanceMonitoringService : LifecycleService() {
             }
         }
 
-        val profile = historyStore.getProtectionMode()
+        val profile = historyStore.getActiveDistanceProfile()
         if (result.status == DistanceStatus.TOO_CLOSE) {
             if (tooCloseSince == 0L) tooCloseSince = now
             notTooCloseSince = 0L
