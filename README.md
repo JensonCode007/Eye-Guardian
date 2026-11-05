@@ -5,6 +5,8 @@ Eye Guardian is an offline Android companion for healthier screen habits. It com
 ## What is here
 
 - **Distance protection** — front-camera analysis stays on the phone; frames are not saved.
+- **Protection profiles** — Reading, Study, Work, and Gaming modes tune sensitivity, warning delay, and cooldown so reminders are useful instead of repetitive.
+- **Scene-light guidance** — the camera's luminance plane is sampled on-device to flag very dim or unusually bright scenes; it is an approximate comfort signal, not a lux meter or medical diagnosis.
 - **Activity dashboard** — foreground-app durations and local daily patterns, without message or page-content access.
 - **Break engine** — long-session and 20/20 reminders with notification actions.
 - **Care history and rewards** — local XP, streaks, Focus Trail scores, unlockable balls, and recommendations.
@@ -24,7 +26,19 @@ From `Android/`:
 ./gradlew testDebugUnitTest lintDebug assembleInstallable
 ```
 
-`installable` is a directly installable development build. The `release` variant is minified and must be signed with a release key before distribution. Never commit a keystore, passwords, `local.properties`, or signing secrets.
+`installable` is a directly installable development build. The public `release` variant is currently kept unminified while the camera/ML stack is being validated on physical devices; it must still be signed with the release key before distribution. Never commit a keystore, passwords, `local.properties`, or signing secrets.
+
+To install live development changes over the GitHub release without uninstalling, build the `local` variant with the same private release keystore used by GitHub Actions:
+
+```powershell
+$env:ANDROID_KEYSTORE_PATH = "C:\path\to\eye-guardian-release.jks"
+$env:ANDROID_KEYSTORE_PASSWORD = "your-keystore-password"
+$env:ANDROID_KEY_ALIAS = "eye-guardian"
+$env:ANDROID_KEY_PASSWORD = "your-key-password"
+./gradlew exportTestApk
+```
+
+This writes `Android/eye-guardian-test.apk`. If the keystore variables are absent, the local variant uses the debug key and cannot update the GitHub release installation.
 
 ## Versioning a GitHub release
 

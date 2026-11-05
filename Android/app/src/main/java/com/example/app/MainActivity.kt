@@ -857,6 +857,7 @@ private fun SettingsScreen(
     var hasUsageAccess by remember { mutableStateOf(usageAccessGranted(context)) }
     var profileName by remember { mutableStateOf(historyStore.getProfileName()) }
     var profileAge by remember { mutableStateOf(historyStore.getProfileAge()?.toString() ?: "") }
+    var protectionMode by remember { mutableStateOf(historyStore.getProtectionMode()) }
     var isEditingProfile by remember {
         mutableStateOf(historyStore.getProfileName().isBlank() && historyStore.getProfileAge() == null)
     }
@@ -1179,6 +1180,21 @@ private fun SettingsScreen(
                 )
             }
         }
+
+        ProtectionModeCard(
+            selectedMode = protectionMode,
+            onModeSelected = { mode ->
+                protectionMode = mode
+                historyStore.setProtectionMode(mode)
+                if (DistanceMonitoringService.isRunning) {
+                    context.startService(
+                        Intent(context, DistanceMonitoringService::class.java).apply {
+                            action = DistanceMonitoringService.ACTION_REFRESH_SETTINGS
+                        }
+                    )
+                }
+            }
+        )
 
         Card(
             border = glassBorder(),
@@ -1668,8 +1684,10 @@ private fun DistanceLabScreen(
     var latestResult by remember { mutableStateOf(DistanceResult.unknown()) }
     var lightAssistEnabled by remember { mutableStateOf(false) }
     var showDistanceWarning by remember { mutableStateOf(false) }
+    var lastLocalWarningAt by remember { mutableStateOf(0L) }
     var permissionMessage by remember { mutableStateOf<String?>(null) }
     val historyStore = remember(context) { EyeGuardianStore(context) }
+    var protectionMode by remember { mutableStateOf(historyStore.getProtectionMode()) }
     var backgroundMonitoring by remember { mutableStateOf(DistanceMonitoringService.isRunning) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -1713,10 +1731,15 @@ private fun DistanceLabScreen(
 
     LightAssistEffect(enabled = lightAssistEnabled)
 
-    LaunchedEffect(latestResult.status, backgroundMonitoring) {
+    LaunchedEffect(latestResult.status, backgroundMonitoring, protectionMode) {
         if (!backgroundMonitoring && latestResult.status == DistanceStatus.TOO_CLOSE) {
-            kotlinx.coroutines.delay(5_000L)
-            if (latestResult.status == DistanceStatus.TOO_CLOSE) {
+            kotlinx.coroutines.delay(protectionMode.warningDelayMillis)
+            if (
+                latestResult.status == DistanceStatus.TOO_CLOSE &&
+                (lastLocalWarningAt == 0L ||
+                    System.currentTimeMillis() - lastLocalWarningAt >= protectionMode.warningCooldownMillis)
+            ) {
+                lastLocalWarningAt = System.currentTimeMillis()
                 historyStore.recordDistanceWarning()
                 showDistanceWarning = true
             }
@@ -1755,6 +1778,21 @@ private fun DistanceLabScreen(
             text = "Keep your face centered and move the phone slowly. This first version learns a broad near/far signal from face size; it does not claim an exact centimetre measurement.",
             style = MaterialTheme.typography.bodyMedium,
             color = appColor(0xFF5F6D65)
+        )
+
+        ProtectionModeCard(
+            selectedMode = protectionMode,
+            onModeSelected = { mode ->
+                protectionMode = mode
+                historyStore.setProtectionMode(mode)
+                if (backgroundMonitoring) {
+                    context.startService(
+                        Intent(context, DistanceMonitoringService::class.java).apply {
+                            action = DistanceMonitoringService.ACTION_REFRESH_SETTINGS
+                        }
+                    )
+                }
+            }
         )
 
         permissionMessage?.let { message ->
@@ -1840,6 +1878,7 @@ private fun DistanceLabScreen(
                         .fillMaxWidth()
                         .aspectRatio(3f / 4f)
                         .clip(RoundedCornerShape(20.dp)),
+                    protectionMode = protectionMode,
                     onDistanceResult = { latestResult = it }
                 )
                 DistanceStatusCard(
@@ -1891,7 +1930,7 @@ private fun DistanceLabScreen(
         }
 
             Text(
-                text = "Calibration note: the face-size thresholds are starter values. The warning appears after five continuous seconds in the too-close state.",
+                text = "Ambient light is estimated from the camera frame on-device. In dim scenes, add a soft room light for a clearer reading; Eye Guardian does not diagnose eye damage or measure blue-light exposure.",
                 style = MaterialTheme.typography.bodySmall,
                 color = appColor(0xFF718078)
             )
@@ -1956,6 +1995,69 @@ private fun DistanceWarningOverlay(onMoveBack: () -> Unit) {
 }
 
 @Composable
+private fun ProtectionModeCard(
+    selectedMode: ProtectionMode,
+    onModeSelected: (ProtectionMode) -> Unit
+) {
+    Card(
+        border = glassBorder(),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = appColor(0xFFE8F0FF).copy(alpha = .88f))
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Protection profile",
+                style = MaterialTheme.typography.titleMedium,
+                color = appColor(0xFF163B2A)
+            )
+            Text(
+                text = "Choose how sensitive distance reminders should be for the way you use your phone. Profiles change the relative face-size threshold, delay, and reminder cooldown.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = appColor(0xFF5F6D65)
+            )
+            ProtectionMode.entries.forEach { mode ->
+                val selected = mode == selectedMode
+                if (selected) {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {},
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = appColor(0xFF2E7D55),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(mode.label)
+                    }
+                } else {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { onModeSelected(mode) }
+                    ) {
+                        Text(mode.label)
+                    }
+                }
+                if (selected) {
+                    Text(
+                        text = mode.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = appColor(0xFF718078)
+                    )
+                }
+            }
+            Text(
+                text = "This is a relative camera signal, not a medical measurement or exact centimetre reading.",
+                style = MaterialTheme.typography.bodySmall,
+                color = appColor(0xFF718078)
+            )
+        }
+    }
+}
+
+@Composable
 private fun DistanceStatusCard(
     result: DistanceResult,
     lightAssistEnabled: Boolean,
@@ -1993,6 +2095,16 @@ private fun DistanceStatusCard(
                 text = result.detail,
                 style = MaterialTheme.typography.bodySmall,
                 color = appColor(0xFF718078)
+            )
+            Text(
+                text = "Ambient light: ${result.ambientLight.label}",
+                style = MaterialTheme.typography.bodySmall,
+                color = when (result.ambientLight) {
+                    AmbientLightLevel.DIM -> appColor(0xFF8A6500)
+                    AmbientLightLevel.BRIGHT -> appColor(0xFF9A5B00)
+                    AmbientLightLevel.COMFORTABLE -> appColor(0xFF2E7D55)
+                    AmbientLightLevel.UNKNOWN -> appColor(0xFF718078)
+                }
             )
             if (result.status == DistanceStatus.LOW_LIGHT) {
                 Button(onClick = onToggleLightAssist) {
@@ -2035,14 +2147,16 @@ private fun LightAssistEffect(enabled: Boolean) {
 @Composable
 private fun CameraPreview(
     modifier: Modifier = Modifier,
+    protectionMode: ProtectionMode = ProtectionMode.READING,
     onDistanceResult: (DistanceResult) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraSession = remember(context, lifecycleOwner) {
+    val cameraSession = remember(context, lifecycleOwner, protectionMode) {
         CameraSession(
             context = context,
             lifecycleOwner = lifecycleOwner,
+            protectionMode = protectionMode,
             onDistanceResult = onDistanceResult
         )
     }
@@ -2064,6 +2178,7 @@ private fun CameraPreview(
 private class CameraSession(
     context: Context,
     private val lifecycleOwner: LifecycleOwner,
+    private val protectionMode: ProtectionMode,
     private val onDistanceResult: (DistanceResult) -> Unit
 ) {
     val previewView: PreviewView = PreviewView(context).apply {
@@ -2096,7 +2211,7 @@ private class CameraSession(
                 .also {
                     it.setAnalyzer(
                         cameraExecutor,
-                        FaceDistanceAnalyzer(faceDetector) { result ->
+                        FaceDistanceAnalyzer(faceDetector, { protectionMode }) { result ->
                             mainHandler.post { onDistanceResult(result) }
                         }
                     )
@@ -2130,8 +2245,9 @@ private class CameraSession(
 }
 
 @SuppressLint("UnsafeOptInUsageError")
-class FaceDistanceAnalyzer(
+internal class FaceDistanceAnalyzer(
     private val faceDetector: FaceDetector,
+    private val protectionModeProvider: () -> ProtectionMode = { ProtectionMode.READING },
     private val onResult: (DistanceResult) -> Unit
 ) : ImageAnalysis.Analyzer {
     private var lastFaceResult: DistanceResult? = null
@@ -2144,8 +2260,9 @@ class FaceDistanceAnalyzer(
             return
         }
 
-        if (averageLuma(imageProxy) < 32f) {
-            onResult(DistanceResult.lowLight())
+        val ambientLight = ambientLightLevelFromLuma(averageLuma(imageProxy))
+        if (ambientLight == AmbientLightLevel.DIM) {
+            onResult(DistanceResult.lowLight(ambientLight))
             imageProxy.close()
             return
         }
@@ -2167,17 +2284,22 @@ class FaceDistanceAnalyzer(
                             DistanceResult(
                                 status = DistanceStatus.TOO_CLOSE,
                                 message = "Your face may be very close or partly outside the frame.",
-                                detail = "Move the phone slightly back so your full face is visible"
+                                detail = "Move the phone slightly back so your full face is visible",
+                                ambientLight = ambientLight
                             )
                         } else {
-                            DistanceResult.unknown("Move into the camera view.")
+                            DistanceResult.unknown("Move into the camera view.", ambientLight)
                         }
                     }
-                    faces.size > 1 -> DistanceResult.unknown("More than one face detected.")
+                    faces.size > 1 -> DistanceResult.unknown("More than one face detected.", ambientLight)
                     else -> {
                         val faceWidthRatio = faces.first().boundingBox.width().toFloat() /
                             inputImage.width.toFloat()
-                        DistanceResult.fromFaceWidthRatio(faceWidthRatio)
+                        DistanceResult.fromFaceWidthRatio(
+                            faceWidthRatio,
+                            protectionModeProvider(),
+                            ambientLight
+                        )
                     }
                 }
                 if (faces.size == 1) {
@@ -2187,7 +2309,7 @@ class FaceDistanceAnalyzer(
                 onResult(result)
             }
             .addOnFailureListener {
-                onResult(DistanceResult.unknown("Face detection is temporarily unavailable."))
+                onResult(DistanceResult.unknown("Face detection is temporarily unavailable.", ambientLight))
             }
             .addOnCompleteListener {
                 imageProxy.close()
@@ -2213,7 +2335,7 @@ class FaceDistanceAnalyzer(
     }
 }
 
-enum class DistanceStatus(val label: String) {
+internal enum class DistanceStatus(val label: String) {
     COMFORTABLE("Comfortable"),
     GETTING_CLOSE("Getting close"),
     TOO_CLOSE("Too close"),
@@ -2221,41 +2343,54 @@ enum class DistanceStatus(val label: String) {
     UNKNOWN("Looking for you")
 }
 
-data class DistanceResult(
+internal data class DistanceResult(
     val status: DistanceStatus,
     val message: String,
-    val detail: String
+    val detail: String,
+    val ambientLight: AmbientLightLevel = AmbientLightLevel.UNKNOWN
 ) {
     companion object {
-        fun unknown(message: String = "Waiting for a clear face view.") = DistanceResult(
+        fun unknown(
+            message: String = "Waiting for a clear face view.",
+            ambientLight: AmbientLightLevel = AmbientLightLevel.UNKNOWN
+        ) = DistanceResult(
             status = DistanceStatus.UNKNOWN,
             message = message,
-            detail = "No distance estimate yet"
+            detail = "No distance estimate yet",
+            ambientLight = ambientLight
         )
 
-        fun lowLight() = DistanceResult(
+        fun lowLight(ambientLight: AmbientLightLevel = AmbientLightLevel.DIM) = DistanceResult(
             status = DistanceStatus.LOW_LIGHT,
             message = "The scene is too dark for a reliable reading.",
-            detail = "Face a light source or enable light assist"
+            detail = "Add a soft room light before relying on the distance estimate",
+            ambientLight = ambientLight
         )
 
-        fun fromFaceWidthRatio(ratio: Float): DistanceResult {
+        fun fromFaceWidthRatio(
+            ratio: Float,
+            protectionMode: ProtectionMode = ProtectionMode.READING,
+            ambientLight: AmbientLightLevel = AmbientLightLevel.UNKNOWN
+        ): DistanceResult {
             val percent = (ratio * 100).toInt()
             return when {
-                ratio >= 0.40f -> DistanceResult(
+                ratio >= protectionMode.tooCloseRatio -> DistanceResult(
                     DistanceStatus.TOO_CLOSE,
                     "Move the phone a little farther away.",
-                    "Face size in frame: about $percent%"
+                    "Face size in frame: about $percent%",
+                    ambientLight
                 )
-                ratio >= 0.28f -> DistanceResult(
+                ratio >= protectionMode.gettingCloseRatio -> DistanceResult(
                     DistanceStatus.GETTING_CLOSE,
                     "A little more space may be comfortable.",
-                    "Face size in frame: about $percent%"
+                    "Face size in frame: about $percent%",
+                    ambientLight
                 )
                 else -> DistanceResult(
                     DistanceStatus.COMFORTABLE,
                     "Your current position looks comfortable.",
-                    "Face size in frame: about $percent%"
+                    "Face size in frame: about $percent%",
+                    ambientLight
                 )
             }
         }
@@ -2456,6 +2591,14 @@ internal class EyeGuardianStore(context: Context) {
 
     fun setSelectedFocusBallId(id: String) {
         preferences.edit().putString(KEY_SELECTED_FOCUS_BALL, id).apply()
+    }
+
+    fun getProtectionMode(): ProtectionMode {
+        return ProtectionMode.fromId(preferences.getString(KEY_PROTECTION_MODE, null))
+    }
+
+    fun setProtectionMode(mode: ProtectionMode) {
+        preferences.edit().putString(KEY_PROTECTION_MODE, mode.name).apply()
     }
 
     fun clearPersonalData() {
@@ -2883,6 +3026,7 @@ internal class EyeGuardianStore(context: Context) {
         const val KEY_INSTALL_DATE = "install_date"
         const val KEY_NOTIFICATION_SOUND_URI = "notification_sound_uri"
         const val KEY_SELECTED_FOCUS_BALL = "selected_focus_ball"
+        const val KEY_PROTECTION_MODE = "protection_mode"
         const val KEY_USAGE = "daily_usage_records"
         const val KEY_WARNINGS = "distance_warning_records"
         const val KEY_GAME_SCORES = "focus_trail_scores"

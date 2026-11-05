@@ -40,6 +40,9 @@ class DistanceMonitoringService : LifecycleService() {
     private lateinit var faceDetector: FaceDetector
     private var tooCloseSince = 0L
     private var warningSentForCurrentBlock = false
+    private var lastWarningAt = 0L
+    private var notTooCloseSince = 0L
+    private var lastAmbientLight = AmbientLightLevel.UNKNOWN
     private var twentyTwentyRunnable: Runnable? = null
     private var twentyTwentyWaitingForResponse = false
     private var breakSessionPackage: String? = null
@@ -78,7 +81,7 @@ class DistanceMonitoringService : LifecycleService() {
                 .also {
                     it.setAnalyzer(
                         cameraExecutor,
-                        FaceDistanceAnalyzer(faceDetector) { result ->
+                        FaceDistanceAnalyzer(faceDetector, { historyStore.getProtectionMode() }) { result ->
                             mainHandler.post { handleDistanceResult(result) }
                         }
                     )
@@ -431,16 +434,51 @@ class DistanceMonitoringService : LifecycleService() {
 
     private fun handleDistanceResult(result: DistanceResult) {
         val now = System.currentTimeMillis()
+        if (result.ambientLight != lastAmbientLight) {
+            lastAmbientLight = result.ambientLight
+            when (result.ambientLight) {
+                AmbientLightLevel.DIM -> postStatusNotification(
+                    title = "Scene looks dim",
+                    text = "Add a soft room light for a clearer distance reading.",
+                    channelId = MONITORING_CHANNEL_ID,
+                    iconRes = R.drawable.ic_notification_eye,
+                    color = NOTIFICATION_GREEN
+                )
+                AmbientLightLevel.BRIGHT -> postStatusNotification(
+                    title = "Scene looks bright",
+                    text = "A softer light can make the camera reading steadier.",
+                    channelId = MONITORING_CHANNEL_ID,
+                    iconRes = R.drawable.ic_notification_eye,
+                    color = NOTIFICATION_GREEN
+                )
+                else -> Unit
+            }
+        }
+
+        val profile = historyStore.getProtectionMode()
         if (result.status == DistanceStatus.TOO_CLOSE) {
             if (tooCloseSince == 0L) tooCloseSince = now
-            if (!warningSentForCurrentBlock && now - tooCloseSince >= WARNING_DELAY_MILLIS) {
+            notTooCloseSince = 0L
+            if (shouldIssueDistanceWarning(
+                    status = result.status,
+                    nowMillis = now,
+                    tooCloseSinceMillis = tooCloseSince,
+                    lastWarningMillis = lastWarningAt,
+                    warningSentForBlock = warningSentForCurrentBlock,
+                    profile = profile
+                )
+            ) {
                 warningSentForCurrentBlock = true
+                lastWarningAt = now
                 historyStore.recordDistanceWarning(now)
                 postDistanceWarning()
             }
         } else {
-            tooCloseSince = 0L
-            warningSentForCurrentBlock = false
+            if (notTooCloseSince == 0L) notTooCloseSince = now
+            if (now - notTooCloseSince >= DISTANCE_RECOVERY_MILLIS) {
+                tooCloseSince = 0L
+                warningSentForCurrentBlock = false
+            }
         }
     }
 
@@ -574,7 +612,7 @@ class DistanceMonitoringService : LifecycleService() {
         private const val BREAK_NOTIFICATION_ID = 4107
         private const val BREAK_START_REQUEST_CODE = 4108
         private const val BREAK_SKIP_REQUEST_CODE = 4109
-        private const val WARNING_DELAY_MILLIS = 5_000L
+        private const val DISTANCE_RECOVERY_MILLIS = 8_000L
         private const val SNOOZE_MILLIS = 5 * 60_000L
         private const val BREAK_CHECK_INTERVAL_MILLIS = 15_000L
         private const val USAGE_EVENT_LOOKBACK_MILLIS = 6 * 60 * 60_000L
