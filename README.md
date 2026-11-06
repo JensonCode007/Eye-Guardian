@@ -2,15 +2,22 @@
 
 Eye Guardian is an offline Android companion for healthier screen habits. It combines on-device viewing-distance checks, optional app-usage summaries, gentle break reminders, local reports, and small focus games.
 
+## Current release
+
+The latest public test release is **v0.1.7**. It is intended for developer and tester feedback before a Play Store launch.
+
 ## What is here
 
 - **Distance protection** — front-camera analysis stays on the phone; frames are not saved.
-- **Protection profiles** — Reading, Study, Work, and Gaming modes tune sensitivity, warning delay, and cooldown so reminders are useful instead of repetitive.
-- **Scene-light guidance** — the camera's luminance plane is sampled on-device to flag very dim or unusually bright scenes; it is an approximate comfort signal, not a lux meter or medical diagnosis.
-- **Activity dashboard** — foreground-app durations and local daily patterns, without message or page-content access.
-- **Break engine** — long-session and 20/20 reminders with notification actions.
-- **Care history and rewards** — local XP, streaks, Focus Trail scores, unlockable balls, and recommendations.
-- **Reports** — user-triggered PDF/JPEG exports for a selected period.
+- **Calibrated distance modes** — create named modes such as Bed, Desk, or Casual, move to a comfortable position in the live preview, and save that camera reference without typing a distance.
+- **Protection profiles** — Reading, Study, Work, Gaming, and custom modes tune sensitivity, warning delay, and cooldown so reminders are useful instead of repetitive.
+- **Ambient-light guidance** — on-device luminance checks flag very dim or unusually bright scenes in the app and through background alerts; this is an approximate comfort signal, not a lux meter or medical diagnosis.
+- **Background protection** — monitoring continues while another app is open, with notification actions, custom notification sounds, and recovery after permission or battery-setting changes.
+- **Activity dashboard** — foreground-app durations, future-hour-safe charts, seven-day patterns, and habit recommendations, without message or page-content access.
+- **Break engine** — long-session and 20/20 reminders with snooze/complete actions, local history, XP, streaks, and completion-aware break rewards.
+- **Care history and rewards** — local XP, streaks, achievements, Focus Trail scores, difficulty levels, unlockable balls, and saved best scores.
+- **Reports and profile** — optional local name/age profile plus user-triggered PDF/JPEG exports for a selected period.
+- **Accessible themes** — light and dark glass-inspired themes with readable contrast and responsive layouts.
 
 The project is currently an open-source GitHub test release. It is not medical advice, a diagnosis, or a replacement for professional eye care.
 
